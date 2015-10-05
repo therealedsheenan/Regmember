@@ -9,23 +9,20 @@
 
 
 class Regmember {
-    
+    const PREFIX = 'email-confirmation-';
+
+    //declares global values
     function __construct () {
         global $reg_errors, $username, $password, $email, $telephone, $first_name, $last_name, $company, $address;
-        $this->registration_submit(); //init submit function
-        $this->registration_form(
-            $username,
-            $password,
-            $email,
-            $telephone,
-            $first_name,
-            $last_name,
-            $company,
-            $address
-        );
     }
 
-    public function registration_form ( $username, $password, $email, $telephone, $first_name, $last_name, $company, $address ) {
+    /*
+        - Displays the UI of the registration form.
+            on editing the form, take note of the label, value and name of field
+            these fields should be the exact names/value to be called upon submitting the form
+    */
+    public function _formRegistration ( $username, $password, $email, $telephone, $first_name, $last_name, $company, $address ) {
+
         echo '
             <style>
             div {
@@ -84,20 +81,29 @@ class Regmember {
         ';
     }
 
-    private function registration_submit () {
+    /*
+        - Creates an event listener if the submit button is clicked.
+        - Upon submission of form, this function calls the _validateRegistration() function
+            to detect errors based on the rules stated on the said function.
+        - These rules can be edited based on the developer's preferences.
+        - The user fields will be validated for the last time to avoid unnecesarry database query injects,
+            invalid characters and etc...
+        - After all the validations, it will call the confirmRegistration function
+        - If not submitted, it will return a NULL value
+    */
+    public function _submitRegistration () {
         if ( isset($_POST['submit'] ) ) {
-            $this->registration_validation(
-            $_POST['username'],
-            $_POST['password'],
-            $_POST['email'],
-            $_POST['tel'],
-            $_POST['fname'],
-            $_POST['lname'],
-            $_POST['cname'],
-            $_POST['address']
+            $this->_validateRegistration(
+                $_POST['username'],
+                $_POST['password'],
+                $_POST['email'],
+                $_POST['tel'],
+                $_POST['fname'],
+                $_POST['lname'],
+                $_POST['cname'],
+                $_POST['address']
             );
 
-            // sanitize user form input
             global $username, $password, $email, $telephone, $first_name, $last_name, $company, $address;
             $username   =   sanitize_user( $_POST['username'] );
             $password   =   esc_attr( $_POST['password'] );
@@ -108,9 +114,7 @@ class Regmember {
             $company    =   sanitize_text_field( $_POST['company'] );
             $address    =   esc_textarea( $_POST['address'] );
 
-            // call @function complete_registration to create the user
-            // only when no WP_error is found
-            $this->complete_registration(
+            $this->_confirmRegistration(
                 $username,
                 $password,
                 $email,
@@ -124,26 +128,64 @@ class Regmember {
         return;
     }
 
-    private function complete_registration ( ){
+    /*
+        - checks if the token if available.
+        - if available, saves user data to database
+    */
+    public function _checkTokenRegistration ( $token ) {
+        $data = get_option( self::PREFIX .'data' );
+        $userData = $data[$token];
+        if ( isset( $userData ) ) {
+            $this->_completeRegistration( $userData );
+            unset( $data[$token] );
+            update_option( self::PREFIX .'data', $data );
+        }
+        return $userData;
+    } //end of _checkTokenRegistration()
+
+    /*
+        - Sends confirmation email to the email field provided by the user upon fill-up.
+    */
+    private function _confirmRegistration ( ){
         global $reg_errors, $username, $password, $email, $telephone, $first_name, $last_name, $company, $address;
         if ( 1 > count( $reg_errors->get_error_messages() ) ) {
-            $userdata = array(
-            'user_login'    =>   $username,
-            'user_pass'     =>   $password,
-            'user_email'    =>   $email,
-            'telephone'     =>   $telephone,
-            'first_name'    =>   $first_name,
-            'last_name'     =>   $last_name,
-            'company'       =>   $company,
-            'address'       =>   $address,
-            'role'          =>   'member'
-            );
-            $user = wp_insert_user( $userdata );
-            echo 'Registration complete. Goto <a href="' . get_site_url() . '/wp-login.php">login page</a>.';
-        }
-    }
+            $headers = "From: admin <admin@systemdev847.com>";
+            $subject = "Asianpropertyawards Confirmation";
+            $message = "Greetings! \r\n \r\n";
+            $message .= "Your registration at Asianpropertyawards.com is confirmed! \r\n \r\n";
+            $message .= "Please visit the following link to complete your registration: \r\n \r\n";
+            $message .= home_url('/register') . "?token=%s";
 
-    private function registration_validation ( $username, $password, $email, $telephone, $first_name, $last_name, $company, $address ) {
+            $this->_sendEmailRegistration( $email, $subject, $message, $headers );
+            echo 'We have sent a confirmation link to the E-mail address you provided. Thank you.';
+        }
+    } //end of _confirmRegistration()
+
+    /*
+        - submits data to database
+    */
+    private function _completeRegistration ( $userData ) {
+        if ( !empty( $userData ) ) {
+            $formatData = array(
+                'user_login'    =>   $userData['username'],
+                'user_pass'     =>   $userData['password'],
+                'user_email'    =>   $userData['email'],
+                'telephone'     =>   $userData['tel'],
+                'first_name'    =>   $userData['fname'],
+                'last_name'     =>   $userData['lname'],
+                'company'       =>   $userData['cname'],
+                'address'       =>   $userData['address'],
+                'role'          =>   'member'
+            );
+            $user = wp_insert_user( $formatData );
+            return;
+        }
+    } //end of _completeRegistration()
+
+    /*
+        - Declares the validation rules of the for fields
+    */
+    private function _validateRegistration ( $username, $password, $email, $telephone, $first_name, $last_name, $company, $address ) {
         global $reg_errors;
         $reg_errors = new WP_Error;
 
@@ -159,7 +201,7 @@ class Regmember {
             $reg_errors->add('user_name', 'Please use another username. That username already exists!');
         }
 
-        if ( ! validate_username( $username ) ) {
+        if ( !validate_username( $username ) ) {
             $reg_errors->add( 'username_invalid', 'Sorry, the username you entered is not valid' );
         }
 
@@ -184,16 +226,44 @@ class Regmember {
 
             }
         }
-    } //end of registration_validation function
-}
+    } //end of _validateRegistration()
 
+    /*
+        - Sends e-mail with unique token
+    */
+    private function _sendEmailRegistration ( $to, $subject, $message, $headers ) {
+        $token = sha1( uniqid() );
+        $oldData = get_option( self::PREFIX .'data' ) ?: array();
+        $data = array();
+        $data[$token] = $_POST;
+        update_option( self::PREFIX .'data', array_merge( $oldData, $data ) );
+
+        wp_mail( $to, $subject, sprintf( $message, $token ), $headers );
+    } //end of _sendEmailRegistration()
+
+}
 
 // Register a new shortcode: [cr_custom_registration]
 add_shortcode( 'cr_custom_registration', 'custom_registration_shortcode' );
- 
+
+//main function call
 function custom_registration_shortcode() {
     ob_start();
-    // custom_registration_function();
     $reg = new Regmember();
+    if ( $reg->_checkTokenRegistration($_GET['token']) ) {
+        echo 'Registration complete. Goto <a href="' . get_site_url() . '/wp-login.php">login page</a>.';
+    } else {
+        $reg->_submitRegistration();
+        $reg->_formRegistration(
+            $username,
+            $password,
+            $email,
+            $telephone,
+            $first_name,
+            $last_name,
+            $company,
+            $address
+        );
+    }
     return ob_get_clean();
 }
